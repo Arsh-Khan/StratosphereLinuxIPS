@@ -518,11 +518,28 @@ class Whitelist(IObservable):
                             "from": from_,
                             "what_to_ignore": what_to_ignore,
                         }
-                        if "ip" in type_ and (
-                            validators.ip_address.ipv6(data)
-                            or validators.ip_address.ipv4(data)
-                        ):
-                            whitelisted_ips[data] = whitelist_line_info
+                        if 'ip' in type_:
+                            if data == '*':
+                                # Whitelist all IP addresses
+                                whitelisted_ips['*'] = {
+                                    'from': from_,
+                                    'what_to_ignore': what_to_ignore,
+                                    'port': port
+                                }
+                            elif (
+                                validators.ip_address.ipv6(data)
+                                or validators.ip_address.ipv4(data)
+                            ):
+                                if port:
+                                    ip_port = f"{data}:{port}"
+                                    whitelisted_ips[ip_port] = {
+                                        'from': from_,
+                                        'what_to_ignore': what_to_ignore,
+                                        'port': port
+                                    }
+                                else:
+                                    whitelisted_ips[data] = whitelist_line_info
+
                         elif "domain" in type_ and validators.domain(data):
                             whitelisted_domains[data] = whitelist_line_info
                             # to be able to whitelist subdomains faster
@@ -552,32 +569,6 @@ class Whitelist(IObservable):
                             except KeyError:
                                 # first time seeing this org
                                 whitelisted_orgs[data] = whitelist_line_info
-
-                        elif "whitelist" in type_:
-                            # Whitelist IP and Port together
-                            try:
-                                ip, port = data.split(":")
-                                if ip == "*":
-                                    ip = None
-                                if port == "*":
-                                    port = None
-
-                                if validators.ipv4(ip) or validators.ipv6(ip):
-                                    if port is None or (
-                                        port.isdigit()
-                                        and 0 <= int(port) <= 65535
-                                    ):
-                                        # Ensures Valid IP and Port Combination
-                                        whitelisted_ips[(ip, port)] = (
-                                            whitelist_line_info
-                                        )
-                            except ValueError:
-                                self.print(
-                                    f"{data} is not a valid ip:port combination.",
-                                    1,
-                                    0,
-                                )
-
                         else:
                             self.print(f"{data} is not a valid {type_}.", 1, 0)
                     except Exception:
@@ -987,16 +978,6 @@ class Whitelist(IObservable):
             self.parse_whitelist(whitelist)
         )
 
-        if ip in whitelisted_ip_ports:
-            whitelist_direction = whitelisted_ip_ports[ip]["from"]
-            what_to_ignore = whitelisted_ip_ports[ip]["what_to_ignore"]
-            ignore_alerts = self.should_ignore_alerts(what_to_ignore)
-
-            if self.ignore_alert(
-                direction, ignore_alerts, whitelist_direction
-            ):
-                return True
-
         if ip in whitelisted_ips:
             # Check if we should ignore src or dst alerts from this ip
             # from_ can be: src, dst, both
@@ -1019,8 +1000,16 @@ class Whitelist(IObservable):
                 ip, whitelisted_macs, direction
             ):
                 return True
+            
+        if ip in whitelisted_ip_ports:
+            whitelist_direction: str = whitelisted_ip_ports[ip]["from"]
+            what_to_ignore = whitelisted_ip_ports[ip]["what_to_ignore"]
+            ignore_alerts = self.should_ignore_alerts(what_to_ignore)
 
-        return False
+            if self.ignore_alert(
+                direction, ignore_alerts, whitelist_direction
+            ):
+                return True
 
     def ignore_alert(
         self, direction, ignore_alerts, whitelist_direction
